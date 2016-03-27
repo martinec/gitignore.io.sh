@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 # =============================================================================
 # gitignore.io.sh - simple gitignore.io shell wrapper
 # https://github.com/martinec/gitignore.io.sh
@@ -33,7 +33,7 @@ WRAPPER_TOOL_API="https://www.gitignore.io/api"
 # exit with critical error
 # =============================================================================
 function die_with_critical_error(){
-  # send message to stderr
+  # send params to stderr
   echo "$@" >&2
 
   # exit
@@ -44,8 +44,11 @@ function die_with_critical_error(){
 # gitignore.io function caller
 # =============================================================================
 function gitignore () {
+  local __output_variable=$1
+  shift
+  
   # gitignore.io.sh api params
-  api_params="$@"
+  api_params="$*"
 
   # curl command arguments
   curl_args="-s $WRAPPER_TOOL_API/$api_params"
@@ -53,26 +56,28 @@ function gitignore () {
   # build command line
   command_line=( $WRAPPER_TOOL_CURL $curl_args )
 
-  echo "# gitignore.io.sh - a simple gitignore.io shell wrapper"
-  echo "# https://github.com/martinec/gitignore.io.sh"
-  echo "# ./$script_name $api_params"
-  echo ""
+  # command output
+  local command_output
 
   {  
     # execute command
-    eval "${command_line[@]}"
+    command_output=$(eval "${command_line[@]}")
     
     # save return code
     exit_status=$?
-  }
+  } > /dev/null
 
   if [ $exit_status -ne 0 ]; then
     die_with_critical_error "Aborting" "$WRAPPER_TOOL_CURL failed! " \
-                                        "exit($exit_status)."
+                                        "exit($exit_status)."                  
   fi
   
-  # return the status
-  return $exit_status
+  if [[ "$__output_variable" ]]; then
+      # shellcheck disable=SC2140
+      eval "$__output_variable"="\$command_output"
+  else
+      echo "$command_output"
+  fi
 }
 
 # =============================================================================
@@ -98,15 +103,37 @@ command -v $WRAPPER_TOOL_CURL > /dev/null || \
 # =============================================================================
 script_name=$(basename "$0")
 
-if [ "$#" -ne 1 ]; then
-  {
-    echo "Usage: $script_name [list|template,...]"
-    echo "   e.g $script_name list"
-    echo "       $script_name c++,linux"
-  } >&2
-  exit 1
+if [ ! -f .gitignore.in ]; then
+  if [ "$#" -ne 1 ]; then
+    {
+      echo "Usage: ./$script_name [list|template,...]"
+      echo "   e.g ./$script_name list"
+      echo "       ./$script_name c++,linux"
+    } >&2
+    exit 1
+  fi
+  ignore_list="$*"
+else
+  if [ "$#" -ne 0 ]; then
+    {
+      echo "Usage: ./$script_name > .gitignore"
+    } >&2
+    exit 1
+  fi
+  ignore_list=$(grep '# ignore_list=' .gitignore.in | sed -e 's/# ignore_list=//g')
 fi
 
-message=$@;
+gitignore_io=""
+gitignore  gitignore_io "$ignore_list"
 
-gitignore "$message"
+if [ ! -f .gitignore.in ]; then
+  if [ "$1" != "list" ]; then
+    echo "# gitignore.io.sh - a simple gitignore.io shell wrapper"
+    echo "# https://github.com/martinec/gitignore.io.sh"
+    echo "# ./$script_name $ignore_list"
+  fi
+  echo "$gitignore_io"
+else
+  # expand the ${gitignore_io} variable inside the gitignore_in file
+  eval "echo \"$(cat .gitignore.in)\"" 
+fi
